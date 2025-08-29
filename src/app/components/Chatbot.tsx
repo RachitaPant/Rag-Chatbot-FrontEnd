@@ -3,6 +3,7 @@ import { useState } from "react";
 type Message = {
   sender: string;
   text: string;
+  audio?: string;
 };
 
 interface ChatBoxProps {
@@ -25,11 +26,16 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
         {messages.map((msg, i) => (
           <div
             key={i}
-            className={`mb-2 ${
+            className={`mb-4 ${
               msg.sender === "You" ? "text-blue-600" : "text-green-600"
             }`}
           >
             <b>{msg.sender}:</b> {msg.text}
+            {msg.audio && (
+              <audio controls className="mt-2">
+                <source src={msg.audio} type="audio/mpeg" />
+              </audio>
+            )}
           </div>
         ))}
       </div>
