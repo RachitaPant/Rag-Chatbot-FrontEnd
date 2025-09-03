@@ -8,7 +8,7 @@ export default function Home() {
 
   const sendMessage = async (text: any) => {
     setMessages([...messages, { sender: "You", text }]);
-    const res = await axios.post("http://localhost:8000/ask", {
+    const res = await axios.post("https://rag-chatbot-backend-user.onrender.com/ask", {
       question: text,
     });
     setMessages((prev) => [...prev, { sender: "Bot", text: res.data.answer }]);
