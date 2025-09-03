@@ -7,6 +7,7 @@ type Message = {
   sender: "You" | "Bot";
   text: string;
   audio?: string;
+  loading?: boolean; 
 };
 
 export default function Home() {
@@ -15,6 +16,12 @@ export default function Home() {
 
   const sendMessage = async (text: string) => {
     setMessages((prev) => [...prev, { sender: "You", text }]);
+
+    // show temporary bot "typing..."
+    setMessages((prev) => [
+      ...prev,
+      { sender: "Bot", text: "Typing...", loading: true },
+    ]);
 
     try {
       const res = await axios.post<{ answer: string; audio_url?: string }>(
@@ -32,9 +39,13 @@ export default function Home() {
         audio: audioUrl,
       };
 
-      setMessages((prev) => [...prev, botMessage]);
+      // replace the loading message with actual bot response
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = botMessage;
+        return updated;
+      });
 
-      // Play audio if available
       if (botMessage.audio) {
         const audio = new Audio(botMessage.audio);
         audio.play().catch((err) => {
@@ -43,15 +54,19 @@ export default function Home() {
       }
     } catch (error) {
       console.error("Error sending message:", error);
-      setMessages((prev) => [
-        ...prev,
-        { sender: "Bot", text: "Something went wrong. Please try again." },
-      ]);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          sender: "Bot",
+          text: "Something went wrong. Please try again.",
+        };
+        return updated;
+      });
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+    <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <ChatBox messages={messages} onSend={sendMessage} />
     </div>
   );
