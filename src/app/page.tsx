@@ -3,6 +3,11 @@ import { useState, useEffect } from "react";
 import axios from "axios";
 import ChatBox from "../app/components/Chatbot";
 
+interface HistoryItem {
+  question: string;
+  answer: string;
+}
+
 type Message = {
   sender: "You" | "Bot";
   text: string;
@@ -23,10 +28,14 @@ export default function Home() {
         if (stored) {
           setSessionId(stored);
           // load old history
-          const res = await axios.get(`${API_BASE}/history/${stored}`);
+          const res = await axios.get<{
+            session_id: string;
+            history: HistoryItem[];
+          }>(`${API_BASE}/history/${stored}`);
+
           if (res.data?.history) {
             const pastMessages: Message[] = [];
-            res.data.history.forEach((h: any) => {
+            res.data.history.forEach((h: HistoryItem) => {
               pastMessages.push({ sender: "You", text: h.question });
               pastMessages.push({ sender: "Bot", text: h.answer });
             });
