@@ -1,10 +1,13 @@
+"use client";
 import { useState, useRef, useEffect } from "react";
+import { motion } from "framer-motion";
 
 type Message = {
   sender: string;
   text: string;
   audio?: string;
   loading?: boolean;
+  avatarUrl?: string;
 };
 
 interface ChatBoxProps {
@@ -32,75 +35,95 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
   };
 
   return (
-    <div className="flex flex-col w-full max-w-3xl h-screen bg-[#d27b67] shadow-2xl rounded-xl overflow-hidden">
-      {/* Header */}
-      <div className="bg-[#e4a496] text-white text-xl font-semibold px-6 py-4 border-b border-white">
-        Lexi Capital Helper Bot
+    <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200">
+      {/* Optional Header */}
+      <div className="border-b border-neutral-800 px-4 py-3 text-center text-sm text-gray-400">
+        Lexi Capital
       </div>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
-        {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${
-              msg.sender === "You" ? "justify-end" : "justify-start"
-            }`}
-          >
-            <div
-              className={`relative max-w-md px-4 py-3 rounded-2xl shadow-md break-words ${
-                msg.sender === "You"
-                  ? "bg-[#d0afa8] text-white rounded-br-none"
-                  : "bg-gray-800 text-gray-200 rounded-bl-none"
+      {/* Chat Messages */}
+      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-neutral-900">
+        {messages.map((msg, i) => {
+          const isUser = msg.sender === "You";
+          return (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, delay: i * 0.05 }}
+              className={`flex items-end gap-2 ${
+                isUser ? "justify-end" : "justify-start"
               }`}
             >
-              {msg.loading ? (
-                <div className="flex space-x-1">
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></span>
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-300"></span>
-                </div>
-              ) : (
-                <p>{msg.text}</p>
+              {/* Bot Avatar */}
+              {!isUser && (
+                <img
+                  src={msg.avatarUrl || "/bot.png"}
+                  alt="bot"
+                  className="w-6 h-6 rounded-full border border-neutral-700 p-1"
+                />
               )}
 
-              {msg.audio && !msg.loading && (
-                <button
-                  onClick={() => playAudio(msg.audio!)}
-                  className="absolute bottom-1 right-2 w-7 h-7 bg-[#d27b67] hover:bg-[#542b22] rounded-full flex items-center justify-center shadow-lg transition transform hover:scale-110"
-                  title="Play audio"
-                >
-                  <svg
-                    className="w-5 h-5 text-white ml-0.5"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
+              {/* Message Bubble */}
+              <div
+                className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug ${
+                  isUser
+                    ? "bg-blue-700 text-white"
+                    : "bg-neutral-800 text-gray-200"
+                }`}
+              >
+                {msg.loading ? (
+                  <div className="flex space-x-1">
+                    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce"></span>
+                    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150"></span>
+                    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300"></span>
+                  </div>
+                ) : (
+                  <p>{msg.text}</p>
+                )}
+                {msg.audio && !msg.loading && (
+                  <button
+                    onClick={() => playAudio(msg.audio!)}
+                    className="absolute bottom-1 right-1 w-6 h-6 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center transition"
+                    title="Play audio"
                   >
-                    <path d="M6 4l12 6-12 6V4z" />
-                  </svg>
-                </button>
+                    ▶
+                  </button>
+                )}
+              </div>
+
+              {/* User Avatar */}
+              {isUser && (
+                <img
+                  src={msg.avatarUrl || "/user.png"}
+                  alt="you"
+                  className="w-6 h-6  p-1 rounded-full border border-blue-600"
+                />
               )}
-            </div>
-          </div>
-        ))}
+            </motion.div>
+          );
+        })}
         <div ref={chatEndRef} />
       </div>
 
       {/* Input */}
-      <div className="flex items-center gap-3 p-4 bg-[#e2aea2] border-t border-white">
-        <input
-          type="text"
-          className="flex-grow bg-[#d27b67] text-white border border-white rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-white"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type your message..."
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-        />
-        <button
-          onClick={handleSend}
-          className="bg-[#d27b67] hover:bg-[#e1c8c3] px-5 py-2 rounded-full text-white transition"
-        >
-          ➤
-        </button>
+      <div className="border-t border-neutral-800 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            className="flex-grow bg-neutral-800 border border-neutral-700 rounded-full px-3 py-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="Type your message..."
+            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+          />
+          <button
+            onClick={handleSend}
+            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition"
+          >
+            Send
+          </button>
+        </div>
       </div>
     </div>
   );
