@@ -6,20 +6,35 @@ import ChatBox from "../app/components/Chatbot";
 type Message = {
   sender: "You" | "Bot";
   text: string;
+  audio?: string;
 };
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
 
   const sendMessage = async (text: string) => {
-    setMessages([...messages, { sender: "You", text }]);
+    setMessages((prev) => [...prev, { sender: "You", text }]);
 
-    const res = await axios.post<{ answer: string }>(
-      "https://rag-chatbot-backend-user.onrender.com/ask",
+    const res = await axios.post<{ answer: string; audio_url?: string }>(
+      "https://rag-chatbot-backend-user.onrender.com/ask", 
       { question: text }
     );
 
-    setMessages((prev) => [...prev, { sender: "Bot", text: res.data.answer }]);
+    const botMessage: Message = {
+      sender: "Bot",
+      text: res.data.answer,
+      audio: res.data.audio_url
+        ? `https://rag-chatbot-backend-user.onrender.com${res.data.audio_url}`
+        : undefined,
+    };
+
+    setMessages((prev) => [...prev, botMessage]);
+
+  
+    if (botMessage.audio) {
+      const audio = new Audio(botMessage.audio);
+      audio.play();
+    }
   };
 
   return (
