@@ -26,15 +26,20 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const playAudio = (url: string) => {
+    const audio = new Audio(url);
+    audio.play().catch((err) => console.error("Audio playback failed:", err));
+  };
+
   return (
-    <div className="w-full max-w-lg bg-white shadow-xl rounded-2xl flex flex-col overflow-hidden border">
+    <div className="flex flex-col w-full max-w-3xl h-screen bg-[#d27b67] shadow-2xl rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="bg-blue-600 text-white text-lg font-semibold px-4 py-3">
-         Chatbot
+      <div className="bg-[#e4a496] text-white text-xl font-semibold px-6 py-4 border-b border-white">
+        Lexi Capital Helper Bot
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
         {messages.map((msg, i) => (
           <div
             key={i}
@@ -43,26 +48,36 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
             }`}
           >
             <div
-              className={`max-w-xs md:max-w-sm px-4 py-2 rounded-2xl shadow ${
+              className={`relative max-w-md px-4 py-3 rounded-2xl shadow-md break-words ${
                 msg.sender === "You"
-                  ? "bg-blue-500 text-white rounded-br-none"
-                  : "bg-gray-200 text-gray-800 rounded-bl-none"
+                  ? "bg-[#d0afa8] text-white rounded-br-none"
+                  : "bg-gray-800 text-gray-200 rounded-bl-none"
               }`}
             >
               {msg.loading ? (
-                // animated typing dots
                 <div className="flex space-x-1">
-                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></span>
-                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-150"></span>
-                  <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce delay-300"></span>
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"></span>
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150"></span>
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-300"></span>
                 </div>
               ) : (
                 <p>{msg.text}</p>
               )}
+
               {msg.audio && !msg.loading && (
-                <audio controls className="mt-2 w-full">
-                  <source src={msg.audio} type="audio/mpeg" />
-                </audio>
+                <button
+                  onClick={() => playAudio(msg.audio!)}
+                  className="absolute bottom-1 right-2 w-7 h-7 bg-[#d27b67] hover:bg-[#542b22] rounded-full flex items-center justify-center shadow-lg transition transform hover:scale-110"
+                  title="Play audio"
+                >
+                  <svg
+                    className="w-5 h-5 text-white ml-0.5"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path d="M6 4l12 6-12 6V4z" />
+                  </svg>
+                </button>
               )}
             </div>
           </div>
@@ -71,10 +86,10 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
       </div>
 
       {/* Input */}
-      <div className="flex items-center gap-2 border-t p-3 bg-white">
+      <div className="flex items-center gap-3 p-4 bg-[#e2aea2] border-t border-white">
         <input
           type="text"
-          className="flex-grow border rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400"
+          className="flex-grow bg-[#d27b67] text-white border border-white rounded-full px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 placeholder-white"
           value={input}
           onChange={(e) => setInput(e.target.value)}
           placeholder="Type your message..."
@@ -82,7 +97,7 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
         />
         <button
           onClick={handleSend}
-          className="bg-blue-600 text-white px-4 py-2 rounded-full hover:bg-blue-700 transition"
+          className="bg-[#d27b67] hover:bg-[#e1c8c3] px-5 py-2 rounded-full text-white transition"
         >
           ➤
         </button>

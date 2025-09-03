@@ -7,7 +7,7 @@ type Message = {
   sender: "You" | "Bot";
   text: string;
   audio?: string;
-  loading?: boolean; 
+  loading?: boolean;
 };
 
 export default function Home() {
@@ -66,7 +66,10 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div
+      className="min-h-screen w-full flex flex-col bg-cover items-center justify-center text-white"
+      style={{ backgroundImage: "url('/dummy-bg.jpg')" }}
+    >
       <ChatBox messages={messages} onSend={sendMessage} />
     </div>
   );
