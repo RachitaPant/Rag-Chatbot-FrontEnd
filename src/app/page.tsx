@@ -3,14 +3,22 @@ import { useState } from "react";
 import axios from "axios";
 import ChatBox from "../app/components/Chatbot";
 
-export default function Home() {
-  const [messages, setMessages] = useState<{ sender: string; text: any }[]>([]);
+type Message = {
+  sender: "You" | "Bot";
+  text: string;
+};
 
-  const sendMessage = async (text: any) => {
+export default function Home() {
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const sendMessage = async (text: string) => {
     setMessages([...messages, { sender: "You", text }]);
-    const res = await axios.post("https://rag-chatbot-backend-user.onrender.com/ask", {
-      question: text,
-    });
+
+    const res = await axios.post<{ answer: string }>(
+      "https://rag-chatbot-backend-user.onrender.com/ask",
+      { question: text }
+    );
+
     setMessages((prev) => [...prev, { sender: "Bot", text: res.data.answer }]);
   };
 
