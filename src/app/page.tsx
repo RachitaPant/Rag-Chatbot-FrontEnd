@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import axios from "axios";
 import ChatBox from "../app/components/Chatbot";
 
@@ -12,12 +12,45 @@ type Message = {
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const API_BASE = "https://rag-chatbot-backend-user.onrender.com";
 
-  const sendMessage = async (text: string) => {
-    setMessages((prev) => [...prev, { sender: "You", text }]);
+  // 🔹 Start session on mount
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        const stored = localStorage.getItem("chat_session");
+        if (stored) {
+          setSessionId(stored);
+          // load old history
+          const res = await axios.get(`${API_BASE}/history/${stored}`);
+          if (res.data?.history) {
+            const pastMessages: Message[] = [];
+            res.data.history.forEach((h: any) => {
+              pastMessages.push({ sender: "You", text: h.question });
+              pastMessages.push({ sender: "Bot", text: h.answer });
+            });
+            setMessages(pastMessages);
+          }
+        } else {
+          const res = await axios.get<{ session_id: string }>(
+            `${API_BASE}/start-session`
+          );
+          setSessionId(res.data.session_id);
+          localStorage.setItem("chat_session", res.data.session_id);
+        }
+      } catch (err) {
+        console.error("Error initializing session:", err);
+      }
+    };
+    initSession();
+  }, []);
 
-    // show temporary bot "typing..."
+  // 🔹 Send message
+  const sendMessage = async (text: string) => {
+    if (!sessionId) return;
+
+    setMessages((prev) => [...prev, { sender: "You", text }]);
     setMessages((prev) => [
       ...prev,
       { sender: "Bot", text: "Typing...", loading: true },
@@ -26,7 +59,7 @@ export default function Home() {
     try {
       const res = await axios.post<{ answer: string; audio_url?: string }>(
         `${API_BASE}/ask`,
-        { question: text }
+        { session_id: sessionId, question: text }
       );
 
       const audioUrl = res.data.audio_url
@@ -39,7 +72,6 @@ export default function Home() {
         audio: audioUrl,
       };
 
-      // replace the loading message with actual bot response
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = botMessage;
@@ -48,9 +80,9 @@ export default function Home() {
 
       if (botMessage.audio) {
         const audio = new Audio(botMessage.audio);
-        audio.play().catch((err) => {
-          console.error("Audio playback failed:", err);
-        });
+        audio
+          .play()
+          .catch((err) => console.error("Audio playback failed:", err));
       }
     } catch (error) {
       console.error("Error sending message:", error);
