@@ -3,29 +3,38 @@ import { useState } from "react";
 import axios from "axios";
 import ChatBox from "../app/components/Chatbot";
 
-export default function Home() {
-  const [messages, setMessages] = useState<
-    { sender: string; text: any; audio?: string }[]
-  >([]);
+type Message = {
+  sender: "You" | "Bot";
+  text: string;
+  audio?: string;
+};
 
-  const sendMessage = async (text: any) => {
+export default function Home() {
+  const [messages, setMessages] = useState<Message[]>([]);
+
+  const sendMessage = async (text: string) => {
     setMessages((prev) => [...prev, { sender: "You", text }]);
 
-    const res = await axios.post("http://localhost:8000/ask", {
-      question: text,
-    });
+    const res = await axios.post<{ answer: string; audio_url?: string }>(
+      "https://rag-chatbot-backend-user.onrender.com/ask", 
+      { question: text }
+    );
 
-    const botMessage = {
+    const botMessage: Message = {
       sender: "Bot",
       text: res.data.answer,
-      audio: `http://localhost:8000${res.data.audio_url}`, // 👈 audio from backend
+      audio: res.data.audio_url
+        ? `https://rag-chatbot-backend-user.onrender.com${res.data.audio_url}`
+        : undefined,
     };
 
     setMessages((prev) => [...prev, botMessage]);
 
-    // 🔊 Auto-play bot response
-    const audio = new Audio(botMessage.audio);
-    audio.play();
+  
+    if (botMessage.audio) {
+      const audio = new Audio(botMessage.audio);
+      audio.play();
+    }
   };
 
   return (
