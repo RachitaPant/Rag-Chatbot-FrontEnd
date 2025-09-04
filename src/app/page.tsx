@@ -110,7 +110,7 @@ export default function Home() {
       <ChatBox
         messages={messages}
         onSend={sendMessage}
-        loadingSession={loadingSession} // ✅ pass down
+        loadingSession={loadingSession}
       />
     </div>
   );

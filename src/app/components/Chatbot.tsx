@@ -87,7 +87,7 @@ export default function ChatBox({
     <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200">
       {/* Optional Header */}
       <div className="border-b border-neutral-800 px-4 py-3 text-center text-sm text-gray-400">
-        Lexi Capital
+        Lexcapital Assitant
       </div>
 
       {/* Chat Messages */}
