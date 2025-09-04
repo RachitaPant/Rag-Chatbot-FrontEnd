@@ -18,7 +18,10 @@ type Message = {
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const API_BASE = "https://rag-chatbot-backend-user.onrender.com";
+
+  // 👉 flexible base URL (env for prod, localhost for dev)
+  const API_BASE =
+    process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
 
   // 🔹 Start session on mount
   useEffect(() => {
@@ -42,6 +45,7 @@ export default function Home() {
             setMessages(pastMessages);
           }
         } else {
+          // start new session
           const res = await axios.get<{ session_id: string }>(
             `${API_BASE}/start-session`
           );
@@ -57,9 +61,14 @@ export default function Home() {
 
   // 🔹 Send message
   const sendMessage = async (text: string) => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      console.warn("No session yet — message ignored:", text);
+      return;
+    }
 
+    // show user's message
     setMessages((prev) => [...prev, { sender: "You", text }]);
+    // placeholder for bot
     setMessages((prev) => [
       ...prev,
       { sender: "Bot", text: "Typing...", loading: true },
@@ -68,38 +77,45 @@ export default function Home() {
     try {
       const res = await axios.post<{ answer: string; audio_url?: string }>(
         `${API_BASE}/ask`,
-        { session_id: sessionId, question: text }
+        { session_id: sessionId, question: text },
+        {
+          headers: { "Content-Type": "application/json" }, // enforce JSON
+        }
       );
 
-      const audioUrl = res.data.audio_url
+      const audioUrl = res.data.audio_url?.startsWith("http")
+        ? res.data.audio_url
+        : res.data.audio_url
         ? `${API_BASE}${res.data.audio_url}`
         : undefined;
 
       const botMessage: Message = {
         sender: "Bot",
-        text: res.data.answer,
+        text: res.data.answer || "I couldn’t generate an answer.",
         audio: audioUrl,
       };
 
+      // replace typing placeholder with actual answer
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = botMessage;
         return updated;
       });
 
+      // autoplay if audio provided
       if (botMessage.audio) {
         const audio = new Audio(botMessage.audio);
-        audio
-          .play()
-          .catch((err) => console.error("Audio playback failed:", err));
+        audio.play().catch((err) =>
+          console.error("Audio playback failed:", err)
+        );
       }
     } catch (error) {
-      console.error("Error sending message:", error);
+      console.error("❌ Error sending message:", error);
       setMessages((prev) => {
         const updated = [...prev];
         updated[updated.length - 1] = {
           sender: "Bot",
-          text: "Something went wrong. Please try again.",
+          text: "⚠️ Something went wrong. Please try again.",
         };
         return updated;
       });
