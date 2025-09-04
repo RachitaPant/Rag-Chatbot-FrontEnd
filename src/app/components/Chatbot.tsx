@@ -16,22 +16,66 @@ interface ChatBoxProps {
 }
 
 export default function ChatBox({ messages, onSend }: ChatBoxProps) {
+  //state
   const [input, setInput] = useState("");
+  const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
+    null
+  );
+  const [isPlaying, setIsPlaying] = useState<string | null>(null);
+  const [copiedMsg, setCopiedMsg] = useState<number | null>(null);
+  //ref
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  // Auto-play the latest bot audio, but keep control
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.audio) {
+      toggleAudio(lastMsg.audio);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
+
+  //handlers
 
   const handleSend = () => {
     if (!input.trim()) return;
     onSend(input);
     setInput("");
   };
+  const toggleAudio = (url: string) => {
+    if (currentAudio && isPlaying === url) {
+      currentAudio.pause();
+      setIsPlaying(null);
+      return;
+    }
+    if (currentAudio) {
+      currentAudio.pause();
+    }
 
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const playAudio = (url: string) => {
     const audio = new Audio(url);
+    setCurrentAudio(audio);
+    setIsPlaying(url);
+
     audio.play().catch((err) => console.error("Audio playback failed:", err));
+
+    audio.onended = () => {
+      setIsPlaying(null);
+      setCurrentAudio(null);
+    };
+  };
+
+  const copyToClipboard = async (text: string, index: number) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMsg(index);
+      setTimeout(() => setCopiedMsg(null), 1500); // reset after 1.5s
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
   };
 
   return (
@@ -66,7 +110,7 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
 
               {/* Message Bubble */}
               <div
-                className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug ${
+                className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug group ${
                   isUser
                     ? "bg-blue-700 text-white"
                     : "bg-neutral-800 text-gray-200"
@@ -81,13 +125,27 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
                 ) : (
                   <p>{msg.text}</p>
                 )}
+
+                {/*  Play/Pause Button */}
                 {msg.audio && !msg.loading && (
                   <button
-                    onClick={() => playAudio(msg.audio!)}
-                    className="absolute bottom-1 right-1 w-6 h-6 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center transition"
-                    title="Play audio"
+                    onClick={() => toggleAudio(msg.audio!)}
+                    className="absolute bottom-1 right-1 w-5 h-5 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center p-2 transition text-xs"
+                    title={
+                      isPlaying === msg.audio ? "Pause audio" : "Play audio"
+                    }
                   >
-                    ▶
+                    {isPlaying === msg.audio ? "⏸" : "▶"}
+                  </button>
+                )}
+
+                {/*  Copy Button */}
+                {!msg.loading && (
+                  <button
+                    onClick={() => copyToClipboard(msg.text, i)}
+                    className="absolute top-1 right-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition"
+                  >
+                    {copiedMsg === i ? "copied" : "📋"}
                   </button>
                 )}
               </div>
@@ -97,7 +155,7 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
                 <img
                   src={msg.avatarUrl || "/user.png"}
                   alt="you"
-                  className="w-6 h-6  p-1 rounded-full border border-blue-600"
+                  className="w-6 h-6 p-1 rounded-full border border-blue-600"
                 />
               )}
             </motion.div>

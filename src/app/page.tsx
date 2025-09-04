@@ -86,13 +86,6 @@ export default function Home() {
         updated[updated.length - 1] = botMessage;
         return updated;
       });
-
-      if (botMessage.audio) {
-        const audio = new Audio(botMessage.audio);
-        audio
-          .play()
-          .catch((err) => console.error("Audio playback failed:", err));
-      }
     } catch (error) {
       console.error("Error sending message:", error);
       setMessages((prev) => {
