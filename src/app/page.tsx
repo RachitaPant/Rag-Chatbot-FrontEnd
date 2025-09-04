@@ -18,10 +18,9 @@ type Message = {
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true); // 🔹 New
 
-  // 👉 flexible base URL (env for prod, localhost for dev)
-  const API_BASE =
-    process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
 
   // 🔹 Start session on mount
   useEffect(() => {
@@ -54,6 +53,8 @@ export default function Home() {
         }
       } catch (err) {
         console.error("Error initializing session:", err);
+      } finally {
+        setLoadingSession(false); // ✅ done loading
       }
     };
     initSession();
@@ -101,14 +102,6 @@ export default function Home() {
         updated[updated.length - 1] = botMessage;
         return updated;
       });
-
-      // autoplay if audio provided
-      if (botMessage.audio) {
-        const audio = new Audio(botMessage.audio);
-        audio.play().catch((err) =>
-          console.error("Audio playback failed:", err)
-        );
-      }
     } catch (error) {
       console.error("❌ Error sending message:", error);
       setMessages((prev) => {
@@ -127,7 +120,11 @@ export default function Home() {
       className="min-h-screen w-full flex flex-col bg-cover items-center justify-center text-white"
       style={{ backgroundImage: "url('/dummy-bg.jpg')" }}
     >
-      <ChatBox messages={messages} onSend={sendMessage} />
+      <ChatBox
+        messages={messages}
+        onSend={sendMessage}
+        loadingSession={loadingSession}
+      />
     </div>
   );
 }
