@@ -18,6 +18,7 @@ type Message = {
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [loadingSession, setLoadingSession] = useState(true); // 🔹 New
   const API_BASE = "https://rag-chatbot-backend-user.onrender.com";
 
   // 🔹 Start session on mount
@@ -50,6 +51,8 @@ export default function Home() {
         }
       } catch (err) {
         console.error("Error initializing session:", err);
+      } finally {
+        setLoadingSession(false); // ✅ done loading
       }
     };
     initSession();
@@ -104,7 +107,11 @@ export default function Home() {
       className="min-h-screen w-full flex flex-col bg-cover items-center justify-center text-white"
       style={{ backgroundImage: "url('/dummy-bg.jpg')" }}
     >
-      <ChatBox messages={messages} onSend={sendMessage} />
+      <ChatBox
+        messages={messages}
+        onSend={sendMessage}
+        loadingSession={loadingSession} // ✅ pass down
+      />
     </div>
   );
 }

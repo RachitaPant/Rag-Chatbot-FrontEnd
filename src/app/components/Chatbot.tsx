@@ -13,9 +13,14 @@ type Message = {
 interface ChatBoxProps {
   messages: Message[];
   onSend: (message: string) => void;
+  loadingSession?: boolean;
 }
 
-export default function ChatBox({ messages, onSend }: ChatBoxProps) {
+export default function ChatBox({
+  messages,
+  onSend,
+  loadingSession,
+}: ChatBoxProps) {
   //state
   const [input, setInput] = useState("");
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
@@ -42,7 +47,7 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
   //handlers
 
   const handleSend = () => {
-    if (!input.trim()) return;
+    if (!input.trim() || loadingSession) return;
     onSend(input);
     setInput("");
   };
@@ -87,80 +92,91 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
 
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-neutral-900">
-        {messages.map((msg, i) => {
-          const isUser = msg.sender === "You";
-          return (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2, delay: i * 0.05 }}
-              className={`flex items-end gap-2 ${
-                isUser ? "justify-end" : "justify-start"
-              }`}
-            >
-              {/* Bot Avatar */}
-              {!isUser && (
-                <img
-                  src={msg.avatarUrl || "/bot.png"}
-                  alt="bot"
-                  className="w-6 h-6 rounded-full border border-neutral-700 p-1"
-                />
-              )}
-
-              {/* Message Bubble */}
-              <div
-                className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug group ${
-                  isUser
-                    ? "bg-blue-700 text-white"
-                    : "bg-neutral-800 text-gray-200"
+        {loadingSession ? (
+          <div className="flex justify-center items-center h-full">
+            {/* Loader while session starts */}
+            <div className="flex space-x-2">
+              <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"></div>
+              <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce delay-150"></div>
+              <div className="w-3 h-3 bg-blue-300 rounded-full animate-bounce delay-300"></div>
+            </div>
+          </div>
+        ) : (
+          messages.map((msg, i) => {
+            const isUser = msg.sender === "You";
+            return (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.2, delay: i * 0.05 }}
+                className={`flex items-end gap-2 ${
+                  isUser ? "justify-end" : "justify-start"
                 }`}
               >
-                {msg.loading ? (
-                  <div className="flex space-x-1">
-                    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce"></span>
-                    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150"></span>
-                    <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300"></span>
-                  </div>
-                ) : (
-                  <p>{msg.text}</p>
+                {/* Bot Avatar */}
+                {!isUser && (
+                  <img
+                    src={msg.avatarUrl || "/bot.png"}
+                    alt="bot"
+                    className="w-6 h-6 rounded-full border border-neutral-700 p-1"
+                  />
                 )}
 
-                {/*  Play/Pause Button */}
-                {msg.audio && !msg.loading && (
-                  <button
-                    onClick={() => toggleAudio(msg.audio!)}
-                    className="absolute bottom-1 right-1 w-5 h-5 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center p-2 transition text-xs"
-                    title={
-                      isPlaying === msg.audio ? "Pause audio" : "Play audio"
-                    }
-                  >
-                    {isPlaying === msg.audio ? "⏸" : "▶"}
-                  </button>
-                )}
+                {/* Message Bubble */}
+                <div
+                  className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug group ${
+                    isUser
+                      ? "bg-blue-700 text-white"
+                      : "bg-neutral-800 text-gray-200"
+                  }`}
+                >
+                  {msg.loading ? (
+                    <div className="flex space-x-1">
+                      <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce"></span>
+                      <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150"></span>
+                      <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300"></span>
+                    </div>
+                  ) : (
+                    <p>{msg.text}</p>
+                  )}
 
-                {/*  Copy Button */}
-                {!msg.loading && (
-                  <button
-                    onClick={() => copyToClipboard(msg.text, i)}
-                    className="absolute top-1 right-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition"
-                  >
-                    {copiedMsg === i ? "copied" : "📋"}
-                  </button>
-                )}
-              </div>
+                  {/*  Play/Pause Button */}
+                  {msg.audio && !msg.loading && (
+                    <button
+                      onClick={() => toggleAudio(msg.audio!)}
+                      className="absolute bottom-1 right-1 w-5 h-5 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center p-2 transition text-xs"
+                      title={
+                        isPlaying === msg.audio ? "Pause audio" : "Play audio"
+                      }
+                    >
+                      {isPlaying === msg.audio ? "⏸" : "▶"}
+                    </button>
+                  )}
 
-              {/* User Avatar */}
-              {isUser && (
-                <img
-                  src={msg.avatarUrl || "/user.png"}
-                  alt="you"
-                  className="w-6 h-6 p-1 rounded-full border border-blue-600"
-                />
-              )}
-            </motion.div>
-          );
-        })}
+                  {/*  Copy Button */}
+                  {!msg.loading && (
+                    <button
+                      onClick={() => copyToClipboard(msg.text, i)}
+                      className="absolute top-1 right-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition"
+                    >
+                      {copiedMsg === i ? "copied" : "📋"}
+                    </button>
+                  )}
+                </div>
+
+                {/* User Avatar */}
+                {isUser && (
+                  <img
+                    src={msg.avatarUrl || "/user.png"}
+                    alt="you"
+                    className="w-6 h-6 p-1 rounded-full border border-blue-600"
+                  />
+                )}
+              </motion.div>
+            );
+          })
+        )}
         <div ref={chatEndRef} />
       </div>
 
@@ -169,15 +185,21 @@ export default function ChatBox({ messages, onSend }: ChatBoxProps) {
         <div className="flex items-center gap-2">
           <input
             type="text"
-            className="flex-grow bg-neutral-800 border border-neutral-700 rounded-full px-3 py-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="flex-grow bg-neutral-800 border border-neutral-700 rounded-full px-3 py-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
             value={input}
+            disabled={loadingSession}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Type your message..."
+            placeholder={
+              loadingSession
+                ? "Initializing session..."
+                : "Type your message..."
+            }
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
           />
           <button
             onClick={handleSend}
-            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition"
+            disabled={loadingSession}
+            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition  disabled:opacity-50"
           >
             Send
           </button>
