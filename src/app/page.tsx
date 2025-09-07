@@ -14,11 +14,201 @@ export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [loadingSession, setLoadingSession] = useState(true);
   const wsRef = useRef<WebSocket | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const reconnectAttempts = useRef<number>(0);
+  const maxReconnectAttempts = 5;
+  const reconnectDelay = 1000;
 
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
   const WS_BASE = process.env.NEXT_PUBLIC_WS_BASE || "ws://127.0.0.1:8000";
 
-  // Start session on mount
+  // Scroll to bottom of chat
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Scroll after messages update
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // Initialize WebSocket with reconnection logic
+  const connectWebSocket = () => {
+    wsRef.current = new WebSocket(`${WS_BASE}/ws/chat`);
+
+    wsRef.current.onopen = () => {
+      console.log("WebSocket connected");
+      reconnectAttempts.current = 0;
+    };
+
+    wsRef.current.onmessage = (event) => {
+      console.log("Raw WebSocket message:", event.data);
+      let data;
+      try {
+        data = JSON.parse(event.data);
+        console.log("Parsed WebSocket data:", data);
+      } catch (err) {
+        console.error("Failed to parse WebSocket message:", err, event.data);
+        return;
+      }
+
+      if (data.error) {
+        console.error("WebSocket error:", data.error);
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+            updated[updated.length - 1] = {
+              sender: "Bot",
+              text: "Error: " + data.error,
+              loading: false,
+            };
+          }
+          return updated;
+        });
+        return;
+      }
+
+      if (data.event === "processing") {
+        console.log("Bot is processing:", data.question);
+        return;
+      }
+
+      if (data.event === "partial_text") {
+        console.log("Received partial_text:", data.text);
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+            updated[updated.length - 1] = {
+              ...updated[updated.length - 1],
+              text: updated[updated.length - 1].text + data.text,
+              loading: true,
+            };
+          } else {
+            updated.push({ sender: "Bot", text: data.text, loading: true });
+          }
+          console.log(
+            "State updated with partial_text:",
+            updated[updated.length - 1].text
+          );
+          return updated;
+        });
+        return;
+      }
+
+      if (data.event === "done") {
+        console.log(
+          "Received done:",
+          data.answer,
+          "audio_url:",
+          data.audio_url
+        );
+        const audioUrl = data.audio_url?.startsWith("http")
+          ? data.audio_url
+          : data.audio_url
+          ? `${API_BASE}${data.audio_url}`
+          : undefined;
+
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+            updated[updated.length - 1] = {
+              sender: "Bot",
+              text: data.answer || "I couldn’t generate an answer.",
+              audio: audioUrl,
+              loading: false,
+            };
+          } else {
+            updated.push({
+              sender: "Bot",
+              text: data.answer || "I couldn’t generate an answer.",
+              audio: audioUrl,
+              loading: false,
+            });
+          }
+          console.log(
+            "State updated with done:",
+            updated[updated.length - 1].text
+          );
+          return updated;
+        });
+        return;
+      }
+
+      if (data.event === "audio_ready") {
+        console.log("Received audio_ready:", data.audio_url);
+        const audioUrl = data.audio_url?.startsWith("http")
+          ? data.audio_url
+          : data.audio_url
+          ? `${API_BASE}${data.audio_url}`
+          : undefined;
+
+        setMessages((prev) => {
+          const updated = [...prev];
+          for (let i = updated.length - 1; i >= 0; i--) {
+            if (updated[i].sender === "Bot" && !updated[i].loading) {
+              updated[i] = { ...updated[i], audio: audioUrl };
+              break;
+            }
+          }
+          console.log("State updated with audio_ready:", audioUrl);
+          return updated;
+        });
+        return;
+      }
+
+      if (data.event === "audio_error") {
+        console.error("TTS error:", data.message);
+        setMessages((prev) => {
+          const updated = [...prev];
+          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+            updated[updated.length - 1] = {
+              sender: "Bot",
+              text: "Error generating audio: " + data.message,
+              loading: false,
+            };
+          }
+          console.log("State updated with audio_error:", data.message);
+          return updated;
+        });
+        return;
+      }
+
+      console.warn("Unhandled WebSocket event:", data.event);
+    };
+
+    wsRef.current.onclose = () => {
+      console.log("WebSocket disconnected");
+      if (reconnectAttempts.current < maxReconnectAttempts) {
+        console.log(
+          `Attempting to reconnect (${
+            reconnectAttempts.current + 1
+          }/${maxReconnectAttempts})...`
+        );
+        setTimeout(() => {
+          reconnectAttempts.current += 1;
+          connectWebSocket();
+        }, reconnectDelay);
+      } else {
+        console.error(
+          "Max reconnect attempts reached. Please refresh the page."
+        );
+        setMessages((prev) => [
+          ...prev,
+          {
+            sender: "Bot",
+            text: "WebSocket connection lost. Please refresh the page.",
+            loading: false,
+          },
+        ]);
+      }
+    };
+
+    wsRef.current.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+  };
+
+  // Start session and initialize WebSocket on mount
   useEffect(() => {
     const initSession = async () => {
       try {
@@ -36,52 +226,21 @@ export default function Home() {
 
         setSessionId(session);
 
-        // Load old history
+        // Load chat history
         const res = await fetch(`${API_BASE}/history/${session}`);
         const data = await res.json();
         if (data?.history) {
           const pastMessages: Message[] = [];
           data.history.forEach((h: { question: string; answer: string }) => {
-            pastMessages.push({ sender: "You", text: h.question });
-            pastMessages.push({ sender: "Bot", text: h.answer });
+            if (h.question)
+              pastMessages.push({ sender: "You", text: h.question });
+            if (h.answer) pastMessages.push({ sender: "Bot", text: h.answer });
           });
           setMessages(pastMessages);
         }
 
         // Initialize WebSocket
-        wsRef.current = new WebSocket(`${WS_BASE}/ws/chat`);
-
-        wsRef.current.onopen = () => console.log("WebSocket connected");
-        wsRef.current.onclose = () => console.log("WebSocket disconnected");
-        wsRef.current.onerror = (err) => console.error("WebSocket error:", err);
-
-        wsRef.current.onmessage = (event) => {
-          const data = JSON.parse(event.data);
-
-          if (data.status === "processing") {
-            console.log("Bot is processing...");
-            return;
-          }
-
-          const audioUrl = data.audio_url?.startsWith("http")
-            ? data.audio_url
-            : data.audio_url
-            ? `${API_BASE}${data.audio_url}`
-            : undefined;
-
-          const botMessage: Message = {
-            sender: "Bot",
-            text: data.answer || "I couldn’t generate an answer.",
-            audio: audioUrl,
-          };
-
-          // Replace the loading placeholder with real message
-          setMessages((prev) => {
-            const updated = [...prev];
-            updated[updated.length - 1] = botMessage;
-            return updated;
-          });
-        };
+        connectWebSocket();
       } catch (err) {
         console.error("Error initializing session:", err);
       } finally {
@@ -104,16 +263,22 @@ export default function Home() {
       wsRef.current.readyState !== WebSocket.OPEN
     ) {
       console.warn("WebSocket not connected yet.");
+      setMessages((prev) => [
+        ...prev,
+        {
+          sender: "Bot",
+          text: "Connection lost. Please try again.",
+          loading: false,
+        },
+      ]);
       return;
     }
 
-    // Show user's message
+    console.log("Sending message:", { session_id: sessionId, question: text });
     setMessages((prev) => [...prev, { sender: "You", text }]);
-
-    // Placeholder for bot typing
     setMessages((prev) => [
       ...prev,
-      { sender: "Bot", text: "Typing...", loading: true },
+      { sender: "Bot", text: "", loading: true }, // Initialize empty loading message
     ]);
 
     wsRef.current.send(
@@ -134,6 +299,7 @@ export default function Home() {
         onSend={sendMessage}
         loadingSession={loadingSession}
       />
+      <div ref={messagesEndRef} />
     </div>
   );
 }

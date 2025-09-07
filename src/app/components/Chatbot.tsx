@@ -24,20 +24,22 @@ export default function ChatBox({
   onSend,
   loadingSession,
 }: ChatBoxProps) {
-  //state
+  // State
   const [input, setInput] = useState("");
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
   );
   const [isPlaying, setIsPlaying] = useState<string | null>(null);
   const [copiedMsg, setCopiedMsg] = useState<number | null>(null);
-  //ref
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [sttError, setSttError] = useState<string | null>(null);
   const botIsTyping = !!(
     messages.length && messages[messages.length - 1].loading
   );
 
+  // Ref
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  // Speech recognition
   const {
     transcript,
     listening,
@@ -45,31 +47,35 @@ export default function ChatBox({
     browserSupportsSpeechRecognition,
   } = useSpeechRecognition();
 
+  // Scroll to bottom and log messages
   useEffect(() => {
+    console.log("ChatBox rendering messages:", messages);
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, transcript]);
 
-  // Auto-play the latest bot audio, but keep control
+  // Auto-play the latest bot audio
   useEffect(() => {
     const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.audio) {
+    if (lastMsg?.audio && !lastMsg.loading) {
       toggleAudio(lastMsg.audio);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages]);
+
+  // Check speech recognition support
   useEffect(() => {
     if (!browserSupportsSpeechRecognition) {
       setSttError("Speech recognition not supported in this browser.");
     }
   }, [browserSupportsSpeechRecognition]);
+
+  // Update input with transcript when listening
   useEffect(() => {
     if (!listening) return;
-    // Only update input if user hasn't typed anything yet
     setInput(transcript);
   }, [transcript, listening]);
 
-  //handlers
-
+  // Handlers
   const handleSend = () => {
     if (!input.trim() || loadingSession) return;
     if (listening) {
@@ -79,10 +85,12 @@ export default function ChatBox({
     setInput("");
     resetTranscript();
   };
+
   const toggleAudio = (url: string) => {
     if (currentAudio && isPlaying === url) {
       currentAudio.pause();
       setIsPlaying(null);
+      setCurrentAudio(null);
       return;
     }
     if (currentAudio) {
@@ -105,11 +113,12 @@ export default function ChatBox({
     try {
       await navigator.clipboard.writeText(text);
       setCopiedMsg(index);
-      setTimeout(() => setCopiedMsg(null), 1500); // reset after 1.5s
+      setTimeout(() => setCopiedMsg(null), 1500);
     } catch (err) {
       console.error("Failed to copy:", err);
     }
   };
+
   const toggleListening = () => {
     if (listening) {
       SpeechRecognition.stopListening();
@@ -117,16 +126,16 @@ export default function ChatBox({
       SpeechRecognition.startListening({ continuous: true, language: "en-US" });
     }
   };
+
   return (
     <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200">
       <div className="border-b border-neutral-800 px-4 py-3 text-center text-sm text-gray-400">
-        Lexcapital Assitant
+        Lexcapital Assistant
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-neutral-900">
         {loadingSession ? (
           <div className="flex justify-center items-center h-full">
-            {/* Loader while session starts */}
             <div className="flex space-x-2">
               <div className="w-3 h-3 bg-blue-500 rounded-full animate-bounce"></div>
               <div className="w-3 h-3 bg-blue-400 rounded-full animate-bounce delay-150"></div>
@@ -146,7 +155,6 @@ export default function ChatBox({
                   isUser ? "justify-end" : "justify-start"
                 }`}
               >
-                {/* Bot Avatar */}
                 {!isUser && (
                   <img
                     src={msg.avatarUrl || "/bot.png"}
@@ -155,7 +163,6 @@ export default function ChatBox({
                   />
                 )}
 
-                {/* Message Bubble */}
                 <div
                   className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug group ${
                     isUser
@@ -164,16 +171,18 @@ export default function ChatBox({
                   }`}
                 >
                   {msg.loading ? (
-                    <div className="flex space-x-1">
-                      <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce"></span>
-                      <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150"></span>
-                      <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300"></span>
+                    <div className="flex flex-col">
+                      <div className="flex space-x-1 mb-1">
+                        <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce"></span>
+                        <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-150"></span>
+                        <span className="w-2 h-2 bg-gray-600 rounded-full animate-bounce delay-300"></span>
+                      </div>
+                      <p>{msg.text}</p>
                     </div>
                   ) : (
                     <p>{msg.text}</p>
                   )}
 
-                  {/*  Play/Pause Button */}
                   {msg.audio && !msg.loading && (
                     <button
                       onClick={() => toggleAudio(msg.audio!)}
@@ -186,7 +195,6 @@ export default function ChatBox({
                     </button>
                   )}
 
-                  {/*  Copy Button */}
                   {!msg.loading && (
                     <button
                       onClick={() => copyToClipboard(msg.text, i)}
@@ -197,7 +205,6 @@ export default function ChatBox({
                   )}
                 </div>
 
-                {/* User Avatar */}
                 {isUser && (
                   <img
                     src={msg.avatarUrl || "/user.png"}
@@ -238,15 +245,15 @@ export default function ChatBox({
               listening ? "bg-red-600" : "bg-neutral-700"
             } text-white`}
             title={listening ? "Stop listening" : "Start speaking"}
-            disabled={botIsTyping} // disable when bot is typing
+            disabled={botIsTyping}
           >
             {listening ? "Stop" : "🎤"}
           </button>
 
           <button
             onClick={handleSend}
-            disabled={loadingSession}
-            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition  disabled:opacity-50"
+            disabled={loadingSession || !input.trim()}
+            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition disabled:opacity-50"
           >
             Send
           </button>
