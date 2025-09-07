@@ -1,12 +1,6 @@
 "use client";
-import { useState, useEffect } from "react";
-import axios from "axios";
-import ChatBox from "../app/components/Chatbot";
-
-interface HistoryItem {
-  question: string;
-  answer: string;
-}
+import { useState, useEffect, useRef } from "react";
+import ChatBox from "./components/Chatbot";
 
 type Message = {
   sender: "You" | "Bot";
@@ -18,101 +12,116 @@ type Message = {
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [loadingSession, setLoadingSession] = useState(true); // 🔹 New
+  const [loadingSession, setLoadingSession] = useState(true);
+  const wsRef = useRef<WebSocket | null>(null);
 
   const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+  const WS_BASE = process.env.NEXT_PUBLIC_WS_BASE || "ws://127.0.0.1:8000";
 
-  // 🔹 Start session on mount
+  // Start session on mount
   useEffect(() => {
     const initSession = async () => {
       try {
         const stored = localStorage.getItem("chat_session");
-        if (stored) {
-          setSessionId(stored);
-          // load old history
-          const res = await axios.get<{
-            session_id: string;
-            history: HistoryItem[];
-          }>(`${API_BASE}/history/${stored}`);
+        let session = stored;
 
-          if (res.data?.history) {
-            const pastMessages: Message[] = [];
-            res.data.history.forEach((h: HistoryItem) => {
-              pastMessages.push({ sender: "You", text: h.question });
-              pastMessages.push({ sender: "Bot", text: h.answer });
-            });
-            setMessages(pastMessages);
+        if (!stored) {
+          const res = await fetch(`${API_BASE}/start-session`);
+          const data = await res.json();
+          session = data.session_id;
+          if (session !== null) {
+            localStorage.setItem("chat_session", session);
           }
-        } else {
-          // start new session
-          const res = await axios.get<{ session_id: string }>(
-            `${API_BASE}/start-session`
-          );
-          setSessionId(res.data.session_id);
-          localStorage.setItem("chat_session", res.data.session_id);
         }
+
+        setSessionId(session);
+
+        // Load old history
+        const res = await fetch(`${API_BASE}/history/${session}`);
+        const data = await res.json();
+        if (data?.history) {
+          const pastMessages: Message[] = [];
+          data.history.forEach((h: { question: string; answer: string }) => {
+            pastMessages.push({ sender: "You", text: h.question });
+            pastMessages.push({ sender: "Bot", text: h.answer });
+          });
+          setMessages(pastMessages);
+        }
+
+        // Initialize WebSocket
+        wsRef.current = new WebSocket(`${WS_BASE}/ws/chat`);
+
+        wsRef.current.onopen = () => console.log("WebSocket connected");
+        wsRef.current.onclose = () => console.log("WebSocket disconnected");
+        wsRef.current.onerror = (err) => console.error("WebSocket error:", err);
+
+        wsRef.current.onmessage = (event) => {
+          const data = JSON.parse(event.data);
+
+          if (data.status === "processing") {
+            console.log("Bot is processing...");
+            return;
+          }
+
+          const audioUrl = data.audio_url?.startsWith("http")
+            ? data.audio_url
+            : data.audio_url
+            ? `${API_BASE}${data.audio_url}`
+            : undefined;
+
+          const botMessage: Message = {
+            sender: "Bot",
+            text: data.answer || "I couldn’t generate an answer.",
+            audio: audioUrl,
+          };
+
+          // Replace the loading placeholder with real message
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = botMessage;
+            return updated;
+          });
+        };
       } catch (err) {
         console.error("Error initializing session:", err);
       } finally {
-        setLoadingSession(false); // ✅ done loading
+        setLoadingSession(false);
       }
     };
+
     initSession();
+
+    return () => {
+      wsRef.current?.close();
+    };
   }, []);
 
-  // 🔹 Send message
-  const sendMessage = async (text: string) => {
-    if (!sessionId) {
-      console.warn("No session yet — message ignored:", text);
+  // Send message over WebSocket
+  const sendMessage = (text: string) => {
+    if (
+      !sessionId ||
+      !wsRef.current ||
+      wsRef.current.readyState !== WebSocket.OPEN
+    ) {
+      console.warn("WebSocket not connected yet.");
       return;
     }
 
-    // show user's message
+    // Show user's message
     setMessages((prev) => [...prev, { sender: "You", text }]);
-    // placeholder for bot
+
+    // Placeholder for bot typing
     setMessages((prev) => [
       ...prev,
       { sender: "Bot", text: "Typing...", loading: true },
     ]);
 
-    try {
-      const res = await axios.post<{ answer: string; audio_url?: string }>(
-        `${API_BASE}/ask`,
-        { session_id: sessionId, question: text },
-        {
-          headers: { "Content-Type": "application/json" }, // enforce JSON
-        }
-      );
-
-      const audioUrl = res.data.audio_url?.startsWith("http")
-        ? res.data.audio_url
-        : res.data.audio_url
-        ? `${API_BASE}${res.data.audio_url}`
-        : undefined;
-
-      const botMessage: Message = {
-        sender: "Bot",
-        text: res.data.answer || "I couldn’t generate an answer.",
-        audio: audioUrl,
-      };
-
-      // replace typing placeholder with actual answer
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = botMessage;
-        return updated;
-      });
-    } catch (error) {
-      console.error("❌ Error sending message:", error);
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          sender: "Bot",
-          text: "⚠️ Something went wrong. Please try again.",
-        };
-        return updated;
-      });
-    }
+    wsRef.current.send(
+      JSON.stringify({
+        session_id: sessionId,
+        question: text,
+      })
+    );
   };
 
   return (
