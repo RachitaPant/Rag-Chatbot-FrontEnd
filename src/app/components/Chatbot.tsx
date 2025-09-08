@@ -1,9 +1,17 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
 import SpeechRecognition, {
   useSpeechRecognition,
 } from "react-speech-recognition";
+import {
+  LiveKitRoom,
+  VoiceAssistantControlBar,
+  BarVisualizer,
+  useVoiceAssistant,
+  RoomAudioRenderer,
+} from "@livekit/components-react";
+import "@livekit/components-styles";
 
 type Message = {
   sender: string;
@@ -15,16 +23,26 @@ type Message = {
 
 interface ChatBoxProps {
   messages: Message[];
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   onSend: (message: string) => void;
   loadingSession?: boolean;
 }
 
 export default function ChatBox({
   messages,
+  setMessages,
   onSend,
   loadingSession,
 }: ChatBoxProps) {
   // State
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://127.0.0.1:8000";
+  const LIVEKIT_URL =
+    process.env.NEXT_PUBLIC_LIVEKIT_URL || "wss://your-project.livekit.cloud";
+
+  const [livekitToken, setLivekitToken] = useState("");
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [roomName] = useState("lexcapital-room");
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [currentAudio, setCurrentAudio] = useState<HTMLAudioElement | null>(
     null
@@ -36,10 +54,21 @@ export default function ChatBox({
     messages.length && messages[messages.length - 1].loading
   );
 
+  // Check for configuration errors at the start
+  if (!API_BASE || !LIVEKIT_URL) {
+    console.error("API_BASE or LIVEKIT_URL is not configured.");
+    return (
+      <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200 justify-center items-center">
+        <p className="text-red-400">
+          Configuration error: API_BASE or LIVEKIT_URL is missing.
+        </p>
+      </div>
+    );
+  }
+
   // Ref
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Speech recognition
   const {
     transcript,
     listening,
@@ -47,62 +76,18 @@ export default function ChatBox({
     browserSupportsSpeechRecognition,
   } = useSpeechRecognition();
 
-  // Scroll to bottom and log messages
-  useEffect(() => {
-    console.log("ChatBox rendering messages:", messages);
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, transcript]);
-
-  // Auto-play the latest bot audio
-  useEffect(() => {
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.audio && !lastMsg.loading) {
-      toggleAudio(lastMsg.audio);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages]);
-
-  // Check speech recognition support
-  useEffect(() => {
-    if (!browserSupportsSpeechRecognition) {
-      setSttError("Speech recognition not supported in this browser.");
-    }
-  }, [browserSupportsSpeechRecognition]);
-
-  // Update input with transcript when listening
-  useEffect(() => {
-    if (!listening) return;
-    setInput(transcript);
-  }, [transcript, listening]);
-
   // Handlers
-  const handleSend = () => {
-    if (!input.trim() || loadingSession) return;
-    if (listening) {
-      SpeechRecognition.stopListening();
-    }
-    onSend(input);
-    setInput("");
-    resetTranscript();
-  };
-
   const toggleAudio = (url: string) => {
-    if (currentAudio && isPlaying === url) {
+    if (currentAudio) {
       currentAudio.pause();
       setIsPlaying(null);
       setCurrentAudio(null);
-      return;
+      if (isPlaying === url) return;
     }
-    if (currentAudio) {
-      currentAudio.pause();
-    }
-
     const audio = new Audio(url);
     setCurrentAudio(audio);
     setIsPlaying(url);
-
     audio.play().catch((err) => console.error("Audio playback failed:", err));
-
     audio.onended = () => {
       setIsPlaying(null);
       setCurrentAudio(null);
@@ -119,12 +104,128 @@ export default function ChatBox({
     }
   };
 
-  const toggleListening = () => {
+  const fetchLivekitToken = useCallback(async () => {
+    if (livekitToken) return;
+    try {
+      const res = await fetch(`${API_BASE}/livekit/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          room_name: roomName,
+          participant_name: "user",
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.token) {
+        setLivekitToken(data.token);
+        setVoiceMode(true);
+      } else {
+        console.error("Token fetch failed:", data);
+        setConnectionError("Failed to fetch LiveKit token.");
+      }
+    } catch (err) {
+      console.error("Error fetching LiveKit token:", err);
+      setConnectionError("Failed to connect to voice assistant.");
+    }
+  }, [API_BASE, roomName, livekitToken]);
+
+  const handleSend = () => {
+    if (!input.trim() || loadingSession) return;
     if (listening) {
       SpeechRecognition.stopListening();
-    } else {
-      SpeechRecognition.startListening({ continuous: true, language: "en-US" });
     }
+    onSend(input);
+    setInput("");
+    resetTranscript();
+  };
+
+  const toggleVoiceMode = async () => {
+    if (voiceMode) {
+      setVoiceMode(false);
+      SpeechRecognition.stopListening();
+    } else {
+      await fetchLivekitToken();
+    }
+  };
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg?.audio && !lastMsg.loading && !voiceMode) {
+      toggleAudio(lastMsg.audio);
+    }
+
+    if (transcript && listening && !voiceMode) {
+      setInput(transcript);
+      const isUserMsg = messages.some(
+        (msg) => msg.sender === "You" && msg.text === transcript
+      );
+      if (!isUserMsg) {
+        setMessages((prev) => [
+          ...prev.filter((msg) => !msg.loading),
+          { sender: "You", text: transcript },
+        ]);
+      }
+    }
+  }, [messages, transcript, listening, voiceMode, setMessages]);
+
+  // Check speech recognition support once on mount
+  useEffect(() => {
+    if (!browserSupportsSpeechRecognition) {
+      setSttError("Speech recognition not supported in this browser.");
+    }
+  }, [browserSupportsSpeechRecognition]);
+
+  // Voice Assistant Component
+  const VoiceAssistant = () => {
+    const { state, audioTrack, agentTranscriptions } = useVoiceAssistant();
+
+    useEffect(() => {
+      console.log("Voice assistant state:", state);
+      console.log("Audio track:", audioTrack);
+      console.log("Agent transcriptions:", agentTranscriptions);
+    }, [state, audioTrack, agentTranscriptions]);
+
+    useEffect(() => {
+      if (voiceMode && agentTranscriptions?.length > 0) {
+        const latestTranscription =
+          agentTranscriptions[agentTranscriptions.length - 1];
+
+        const isDuplicate = messages.some(
+          (msg) =>
+            msg.sender === "Assistant" && msg.text === latestTranscription.text
+        );
+
+        if (latestTranscription.text && !isDuplicate) {
+          setMessages((prev) => [
+            ...prev.filter((msg) => !msg.loading),
+            {
+              sender: "Assistant",
+              text: latestTranscription.text,
+              avatarUrl: "/bot.png",
+            },
+          ]);
+        }
+      }
+    }, [agentTranscriptions, voiceMode, setMessages, messages]);
+
+    return (
+      <div className="voice-mode mb-4">
+        <p className="text-xs text-gray-500">Voice Assistant State: {state}</p>
+        <VoiceAssistantControlBar />
+        <BarVisualizer
+          trackRef={audioTrack}
+          state={state}
+          barCount={5}
+          style={{ height: "50px" }}
+        />
+        <RoomAudioRenderer />
+      </div>
+    );
   };
 
   return (
@@ -162,7 +263,6 @@ export default function ChatBox({
                     className="w-6 h-6 rounded-full border border-neutral-700 p-1"
                   />
                 )}
-
                 <div
                   className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug group ${
                     isUser
@@ -182,8 +282,7 @@ export default function ChatBox({
                   ) : (
                     <p>{msg.text}</p>
                   )}
-
-                  {msg.audio && !msg.loading && (
+                  {msg.audio && !msg.loading && !voiceMode && (
                     <button
                       onClick={() => toggleAudio(msg.audio!)}
                       className="absolute bottom-1 right-1 w-5 h-5 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center p-2 transition text-xs"
@@ -194,7 +293,6 @@ export default function ChatBox({
                       {isPlaying === msg.audio ? "⏸" : "▶"}
                     </button>
                   )}
-
                   {!msg.loading && (
                     <button
                       onClick={() => copyToClipboard(msg.text, i)}
@@ -204,7 +302,6 @@ export default function ChatBox({
                     </button>
                   )}
                 </div>
-
                 {isUser && (
                   <img
                     src={msg.avatarUrl || "/user.png"}
@@ -223,7 +320,22 @@ export default function ChatBox({
         {sttError && (
           <div className="mb-2 text-xs text-red-400">{sttError}</div>
         )}
-
+        {connectionError && (
+          <div className="mb-2 text-xs text-red-400">{connectionError}</div>
+        )}
+        {voiceMode && !livekitToken && (
+          <p className="text-red-400">Connecting to LiveKit...</p>
+        )}
+        {voiceMode && livekitToken && (
+          <LiveKitRoom
+            token={livekitToken}
+            serverUrl={LIVEKIT_URL}
+            data-lk-theme="default"
+            style={{ height: "150px" }}
+          >
+            <VoiceAssistant />
+          </LiveKitRoom>
+        )}
         <div className="flex items-center gap-2">
           <input
             type="text"
@@ -238,18 +350,16 @@ export default function ChatBox({
             }
             onKeyDown={(e) => e.key === "Enter" && handleSend()}
           />
-
           <button
-            onClick={toggleListening}
+            onClick={toggleVoiceMode}
             className={`px-3 py-2 rounded-full ${
-              listening ? "bg-red-600" : "bg-neutral-700"
+              voiceMode ? "bg-red-600" : "bg-neutral-700"
             } text-white`}
-            title={listening ? "Stop listening" : "Start speaking"}
+            title={voiceMode ? "Stop voice" : "Start voice"}
             disabled={botIsTyping}
           >
-            {listening ? "Stop" : "🎤"}
+            {voiceMode ? "Stop" : "🎤 Voice Mode"}
           </button>
-
           <button
             onClick={handleSend}
             disabled={loadingSession || !input.trim()}

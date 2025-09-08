@@ -3,10 +3,11 @@ import { useState, useEffect, useRef } from "react";
 import ChatBox from "./components/Chatbot";
 
 type Message = {
-  sender: "You" | "Bot";
+  sender: string;
   text: string;
   audio?: string;
   loading?: boolean;
+  avatarUrl?: string;
 };
 
 export default function Home() {
@@ -296,6 +297,7 @@ export default function Home() {
     >
       <ChatBox
         messages={messages}
+        setMessages={setMessages}
         onSend={sendMessage}
         loadingSession={loadingSession}
       />
