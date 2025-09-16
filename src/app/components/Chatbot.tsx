@@ -103,10 +103,14 @@ export default function ChatBox({
       console.error("Failed to copy:", err);
     }
   };
-
   const fetchLivekitToken = useCallback(async () => {
     if (livekitToken) return;
     try {
+      console.log("Fetching token from:", `${API_BASE}/livekit/token`);
+      console.log("Request payload:", {
+        room_name: roomName,
+        participant_name: "user",
+      });
       const res = await fetch(`${API_BASE}/livekit/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -115,20 +119,36 @@ export default function ChatBox({
           participant_name: "user",
         }),
       });
+      console.log("Response status:", res.status);
       if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`);
+        const errorText = await res.text();
+        throw new Error(
+          `HTTP error! status: ${res.status}, message: ${errorText}`
+        );
       }
       const data = await res.json();
+      console.log("Response data:", data);
       if (data.token) {
         setLivekitToken(data.token);
+        console.log("Token fetched successfully:", data.token);
+        console.log(
+          "LIVEKIT_URL:",
+          LIVEKIT_URL,
+          "tokenLen:",
+          data.token.length
+        );
         setVoiceMode(true);
       } else {
-        console.error("Token fetch failed:", data);
-        setConnectionError("Failed to fetch LiveKit token.");
+        console.error("Token fetch failed, no token in response:", data);
+        setConnectionError(
+          "Failed to fetch LiveKit token: No token in response."
+        );
       }
     } catch (err) {
       console.error("Error fetching LiveKit token:", err);
-      setConnectionError("Failed to connect to voice assistant.");
+      setConnectionError(
+        `Failed to connect to voice assistant: ${err.message}`
+      );
     }
   }, [API_BASE, roomName, livekitToken]);
 
