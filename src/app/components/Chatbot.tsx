@@ -12,6 +12,7 @@ import {
   RoomAudioRenderer,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
+import Image from "next/image"; // Import Next.js Image component
 
 type Message = {
   sender: string;
@@ -61,27 +62,11 @@ export default function ChatBox({
     messages[messages.length - 1].source !== "voice"
   );
 
-  // Check for configuration errors at the start
-  if (!API_BASE || !LIVEKIT_URL) {
-    console.error("API_BASE or LIVEKIT_URL is not configured.");
-    return (
-      <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200 justify-center items-center">
-        <p className="text-red-400">
-          Configuration error: API_BASE or LIVEKIT_URL is missing.
-        </p>
-      </div>
-    );
-  }
-
-  // Ref
+  // Refs
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const voiceModeRef = useRef(voiceMode);
 
-  // Update ref when voiceMode changes
-  useEffect(() => {
-    voiceModeRef.current = voiceMode;
-  }, [voiceMode]);
-
+  // Hooks
   const {
     transcript,
     listening,
@@ -89,25 +74,33 @@ export default function ChatBox({
     browserSupportsSpeechRecognition,
   } = useSpeechRecognition();
 
-  // Handlers
-  const toggleAudio = (url: string) => {
-    if (currentAudio) {
-      currentAudio.pause();
-      setIsPlaying(null);
-      setCurrentAudio(null);
-      if (isPlaying === url) return;
-    }
-    const audio = new Audio(url);
-    setCurrentAudio(audio);
-    setIsPlaying(url);
-    audio.play().catch((err) => console.error("Audio playback failed:", err));
-    audio.onended = () => {
-      setIsPlaying(null);
-      setCurrentAudio(null);
-    };
-  };
+  // Update ref when voiceMode changes
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
 
-  const copyToClipboard = async (text: string, index: number) => {
+  // Memoized handlers
+  const toggleAudio = useCallback(
+    (url: string) => {
+      if (currentAudio) {
+        currentAudio.pause();
+        setIsPlaying(null);
+        setCurrentAudio(null);
+        if (isPlaying === url) return;
+      }
+      const audio = new Audio(url);
+      setCurrentAudio(audio);
+      setIsPlaying(url);
+      audio.play().catch((err) => console.error("Audio playback failed:", err));
+      audio.onended = () => {
+        setIsPlaying(null);
+        setCurrentAudio(null);
+      };
+    },
+    [currentAudio, isPlaying]
+  );
+
+  const copyToClipboard = useCallback(async (text: string, index: number) => {
     try {
       await navigator.clipboard.writeText(text);
       setCopiedMsg(index);
@@ -115,7 +108,7 @@ export default function ChatBox({
     } catch (err) {
       console.error("Failed to copy:", err);
     }
-  };
+  }, []);
 
   const fetchLivekitToken = useCallback(async () => {
     if (livekitToken) return;
@@ -151,12 +144,12 @@ export default function ChatBox({
     } catch (err) {
       console.error("Error fetching LiveKit token:", err);
       setConnectionError(
-        `Failed to connect to voice assistant: ${err.message}`
+        `Failed to connect to voice assistant: ${(err as Error).message}`
       );
     }
   }, [API_BASE, roomName, livekitToken]);
 
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     if (!input.trim() || loadingSession || voiceMode) return;
     if (listening) {
       SpeechRecognition.stopListening();
@@ -164,14 +157,13 @@ export default function ChatBox({
     onSend(input);
     setInput("");
     resetTranscript();
-  };
+  }, [input, loadingSession, voiceMode, listening, onSend, resetTranscript]);
 
-  const toggleVoiceMode = async () => {
+  const toggleVoiceMode = useCallback(async () => {
     if (voiceMode) {
       setVoiceMode(false);
-      setLivekitToken(""); // Clear token to allow fresh connection
+      setLivekitToken("");
       SpeechRecognition.stopListening();
-      // Stop any playing audio
       if (currentAudio) {
         currentAudio.pause();
         setIsPlaying(null);
@@ -180,13 +172,11 @@ export default function ChatBox({
     } else {
       await fetchLivekitToken();
     }
-  };
+  }, [voiceMode, currentAudio, fetchLivekitToken]);
 
-  // Auto-scroll and audio handling - but only for non-voice mode
+  // Auto-scroll and audio handling
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-
-    // Only auto-play audio in text mode, not voice mode
     if (!voiceMode) {
       const lastMsg = messages[messages.length - 1];
       if (
@@ -197,16 +187,16 @@ export default function ChatBox({
         toggleAudio(lastMsg.audio);
       }
     }
-  }, [messages, voiceMode]);
+  }, [messages, voiceMode, toggleAudio]);
 
-  // Handle speech recognition transcript - only in text mode
+  // Handle speech recognition transcript
   useEffect(() => {
     if (transcript && listening && !voiceMode) {
       setInput(transcript);
     }
   }, [transcript, listening, voiceMode]);
 
-  // Check speech recognition support once on mount
+  // Check speech recognition support
   useEffect(() => {
     if (!browserSupportsSpeechRecognition) {
       setSttError("Speech recognition not supported in this browser.");
@@ -225,17 +215,14 @@ export default function ChatBox({
     useEffect(() => {
       if (!voiceModeRef.current || !agentTranscriptions?.length) return;
 
-      // Clear any existing timeout to debounce
       if (transcriptionTimeoutRef.current) {
         clearTimeout(transcriptionTimeoutRef.current);
       }
 
-      // Debounce transcription processing
       transcriptionTimeoutRef.current = setTimeout(() => {
         const latestTranscription =
           agentTranscriptions[agentTranscriptions.length - 1];
 
-        // Skip empty or very short transcriptions
         if (
           !latestTranscription.text ||
           latestTranscription.text.trim().length < 3
@@ -244,11 +231,8 @@ export default function ChatBox({
         }
 
         const currentText = latestTranscription.text.trim();
-
-        // Generate a unique ID for this transcription
         const transcriptionId = `${Date.now()}-${currentText.slice(0, 20)}`;
 
-        // Only process if the text is new and different from the last processed text
         if (
           transcriptionId !== lastVoiceTranscriptionId &&
           currentText !== lastProcessedTextRef.current
@@ -256,12 +240,10 @@ export default function ChatBox({
           console.log("Adding voice transcription:", currentText);
 
           setMessages((prev) => {
-            // Remove any loading voice messages
             const filtered = prev.filter(
               (msg) => !(msg.loading && msg.source === "voice")
             );
 
-            // Check for duplicates based on exact text
             const isDuplicate = filtered.some(
               (msg) =>
                 msg.sender === "Assistant" &&
@@ -276,7 +258,7 @@ export default function ChatBox({
                   sender: "Assistant",
                   text: currentText,
                   avatarUrl: "/bot.png",
-                  source: "voice" as const,
+                  source: "voice",
                 },
               ];
             }
@@ -284,17 +266,16 @@ export default function ChatBox({
           });
 
           setLastVoiceTranscriptionId(transcriptionId);
-          lastProcessedTextRef.current = currentText; // Update last processed text
+          lastProcessedTextRef.current = currentText;
         }
-      }, 750); // Increased debounce time to 750ms for more stability
+      }, 750);
 
-      // Cleanup timeout on unmount
       return () => {
         if (transcriptionTimeoutRef.current) {
           clearTimeout(transcriptionTimeoutRef.current);
         }
       };
-    }, [agentTranscriptions, lastVoiceTranscriptionId]);
+    }, [agentTranscriptions]); // Removed lastVoiceTranscriptionId
 
     return (
       <div className="voice-mode mb-4">
@@ -313,16 +294,22 @@ export default function ChatBox({
       </div>
     );
   };
+
   // Filter messages based on mode
-  const filteredMessages = messages.filter((msg) => {
-    if (voiceMode) {
-      // In voice mode, show all messages but prioritize voice messages
-      return true;
-    } else {
-      // In text mode, hide voice-only messages
-      return msg.source !== "voice";
-    }
-  });
+  const filteredMessages = voiceMode
+    ? messages
+    : messages.filter((msg) => msg.source !== "voice");
+
+  // Configuration check
+  if (!API_BASE || !LIVEKIT_URL) {
+    return (
+      <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200 justify-center items-center">
+        <p className="text-red-400">
+          Configuration error: API_BASE or LIVEKIT_URL is missing.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200">
@@ -358,10 +345,12 @@ export default function ChatBox({
                 }`}
               >
                 {!isUser && (
-                  <img
+                  <Image
                     src={msg.avatarUrl || "/bot.png"}
                     alt="bot"
-                    className={`w-6 h-6 rounded-full border p-1 ${
+                    width={24}
+                    height={24}
+                    className={`rounded-full border p-1 ${
                       isVoiceMessage ? "border-green-500" : "border-neutral-700"
                     }`}
                   />
@@ -388,7 +377,6 @@ export default function ChatBox({
                     <p>{msg.text}</p>
                   )}
 
-                  {/* Audio button - only show for websocket messages and not in voice mode */}
                   {msg.audio &&
                     !msg.loading &&
                     !voiceMode &&
@@ -404,7 +392,6 @@ export default function ChatBox({
                       </button>
                     )}
 
-                  {/* Copy button */}
                   {!msg.loading && (
                     <button
                       onClick={() => copyToClipboard(msg.text, i)}
@@ -415,10 +402,12 @@ export default function ChatBox({
                   )}
                 </div>
                 {isUser && (
-                  <img
+                  <Image
                     src={msg.avatarUrl || "/user.png"}
                     alt="you"
-                    className="w-6 h-6 p-1 rounded-full border border-blue-600"
+                    width={24}
+                    height={24}
+                    className="p-1 rounded-full border border-blue-600"
                   />
                 )}
               </motion.div>
@@ -453,7 +442,6 @@ export default function ChatBox({
           </LiveKitRoom>
         )}
 
-        {/* Text input - disabled in voice mode */}
         <div className="flex items-center gap-2">
           <input
             type="text"
