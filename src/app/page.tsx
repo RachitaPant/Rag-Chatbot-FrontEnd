@@ -8,6 +8,7 @@ type Message = {
   audio?: string;
   loading?: boolean;
   avatarUrl?: string;
+  source?: "websocket" | "voice" | "user";
 };
 
 export default function Home() {
@@ -57,11 +58,16 @@ export default function Home() {
         console.error("WebSocket error:", data.error);
         setMessages((prev) => {
           const updated = [...prev];
-          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+          if (
+            updated.length > 0 &&
+            updated[updated.length - 1]?.loading &&
+            updated[updated.length - 1]?.source === "websocket"
+          ) {
             updated[updated.length - 1] = {
               sender: "Bot",
               text: "Error: " + data.error,
               loading: false,
+              source: "websocket",
             };
           }
           return updated;
@@ -78,14 +84,23 @@ export default function Home() {
         console.log("Received partial_text:", data.text);
         setMessages((prev) => {
           const updated = [...prev];
-          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+          const lastMessage = updated[updated.length - 1];
+
+          if (lastMessage?.loading && lastMessage?.source === "websocket") {
+            // Update existing loading message
             updated[updated.length - 1] = {
-              ...updated[updated.length - 1],
-              text: updated[updated.length - 1].text + data.text,
+              ...lastMessage,
+              text: lastMessage.text + data.text,
               loading: true,
             };
           } else {
-            updated.push({ sender: "Bot", text: data.text, loading: true });
+            // Create new loading message
+            updated.push({
+              sender: "Bot",
+              text: data.text,
+              loading: true,
+              source: "websocket",
+            });
           }
           console.log(
             "State updated with partial_text:",
@@ -111,19 +126,25 @@ export default function Home() {
 
         setMessages((prev) => {
           const updated = [...prev];
-          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+          const lastMessage = updated[updated.length - 1];
+
+          if (lastMessage?.loading && lastMessage?.source === "websocket") {
+            // Update existing loading message
             updated[updated.length - 1] = {
               sender: "Bot",
-              text: data.answer || "I couldn’t generate an answer.",
+              text: data.answer || "I couldn't generate an answer.",
               audio: audioUrl,
               loading: false,
+              source: "websocket",
             };
           } else {
+            // Create new message if no loading message exists
             updated.push({
               sender: "Bot",
-              text: data.answer || "I couldn’t generate an answer.",
+              text: data.answer || "I couldn't generate an answer.",
               audio: audioUrl,
               loading: false,
+              source: "websocket",
             });
           }
           console.log(
@@ -145,8 +166,13 @@ export default function Home() {
 
         setMessages((prev) => {
           const updated = [...prev];
+          // Find the last websocket bot message without loading
           for (let i = updated.length - 1; i >= 0; i--) {
-            if (updated[i].sender === "Bot" && !updated[i].loading) {
+            if (
+              updated[i].sender === "Bot" &&
+              !updated[i].loading &&
+              updated[i].source === "websocket"
+            ) {
               updated[i] = { ...updated[i], audio: audioUrl };
               break;
             }
@@ -161,11 +187,16 @@ export default function Home() {
         console.error("TTS error:", data.message);
         setMessages((prev) => {
           const updated = [...prev];
-          if (updated.length > 0 && updated[updated.length - 1]?.loading) {
+          if (
+            updated.length > 0 &&
+            updated[updated.length - 1]?.loading &&
+            updated[updated.length - 1]?.source === "websocket"
+          ) {
             updated[updated.length - 1] = {
               sender: "Bot",
               text: "Error generating audio: " + data.message,
               loading: false,
+              source: "websocket",
             };
           }
           console.log("State updated with audio_error:", data.message);
@@ -199,6 +230,7 @@ export default function Home() {
             sender: "Bot",
             text: "WebSocket connection lost. Please refresh the page.",
             loading: false,
+            source: "websocket",
           },
         ]);
       }
@@ -234,8 +266,17 @@ export default function Home() {
           const pastMessages: Message[] = [];
           data.history.forEach((h: { question: string; answer: string }) => {
             if (h.question)
-              pastMessages.push({ sender: "You", text: h.question });
-            if (h.answer) pastMessages.push({ sender: "Bot", text: h.answer });
+              pastMessages.push({
+                sender: "You",
+                text: h.question,
+                source: "user",
+              });
+            if (h.answer)
+              pastMessages.push({
+                sender: "Bot",
+                text: h.answer,
+                source: "websocket",
+              });
           });
           setMessages(pastMessages);
         }
@@ -270,16 +311,33 @@ export default function Home() {
           sender: "Bot",
           text: "Connection lost. Please try again.",
           loading: false,
+          source: "websocket",
         },
       ]);
       return;
     }
 
     console.log("Sending message:", { session_id: sessionId, question: text });
-    setMessages((prev) => [...prev, { sender: "You", text }]);
+
+    // Add user message
     setMessages((prev) => [
       ...prev,
-      { sender: "Bot", text: "", loading: true }, // Initialize empty loading message
+      {
+        sender: "You",
+        text,
+        source: "user",
+      },
+    ]);
+
+    // Add loading bot message
+    setMessages((prev) => [
+      ...prev,
+      {
+        sender: "Bot",
+        text: "",
+        loading: true,
+        source: "websocket",
+      },
     ]);
 
     wsRef.current.send(

@@ -19,6 +19,7 @@ type Message = {
   audio?: string;
   loading?: boolean;
   avatarUrl?: string;
+  source?: "websocket" | "voice" | "user";
 };
 
 interface ChatBoxProps {
@@ -50,8 +51,14 @@ export default function ChatBox({
   const [isPlaying, setIsPlaying] = useState<string | null>(null);
   const [copiedMsg, setCopiedMsg] = useState<number | null>(null);
   const [sttError, setSttError] = useState<string | null>(null);
+  const [lastVoiceTranscriptionId, setLastVoiceTranscriptionId] = useState<
+    string | null
+  >(null);
+
   const botIsTyping = !!(
-    messages.length && messages[messages.length - 1].loading
+    messages.length &&
+    messages[messages.length - 1].loading &&
+    messages[messages.length - 1].source !== "voice"
   );
 
   // Check for configuration errors at the start
@@ -68,6 +75,12 @@ export default function ChatBox({
 
   // Ref
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const voiceModeRef = useRef(voiceMode);
+
+  // Update ref when voiceMode changes
+  useEffect(() => {
+    voiceModeRef.current = voiceMode;
+  }, [voiceMode]);
 
   const {
     transcript,
@@ -103,14 +116,11 @@ export default function ChatBox({
       console.error("Failed to copy:", err);
     }
   };
+
   const fetchLivekitToken = useCallback(async () => {
     if (livekitToken) return;
     try {
       console.log("Fetching token from:", `${API_BASE}/livekit/token`);
-      console.log("Request payload:", {
-        room_name: roomName,
-        participant_name: "user",
-      });
       const res = await fetch(`${API_BASE}/livekit/token`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -119,24 +129,18 @@ export default function ChatBox({
           participant_name: "user",
         }),
       });
-      console.log("Response status:", res.status);
+
       if (!res.ok) {
         const errorText = await res.text();
         throw new Error(
           `HTTP error! status: ${res.status}, message: ${errorText}`
         );
       }
+
       const data = await res.json();
-      console.log("Response data:", data);
       if (data.token) {
         setLivekitToken(data.token);
-        console.log("Token fetched successfully:", data.token);
-        console.log(
-          "LIVEKIT_URL:",
-          LIVEKIT_URL,
-          "tokenLen:",
-          data.token.length
-        );
+        console.log("Token fetched successfully");
         setVoiceMode(true);
       } else {
         console.error("Token fetch failed, no token in response:", data);
@@ -153,7 +157,7 @@ export default function ChatBox({
   }, [API_BASE, roomName, livekitToken]);
 
   const handleSend = () => {
-    if (!input.trim() || loadingSession) return;
+    if (!input.trim() || loadingSession || voiceMode) return;
     if (listening) {
       SpeechRecognition.stopListening();
     }
@@ -165,33 +169,42 @@ export default function ChatBox({
   const toggleVoiceMode = async () => {
     if (voiceMode) {
       setVoiceMode(false);
+      setLivekitToken(""); // Clear token to allow fresh connection
       SpeechRecognition.stopListening();
+      // Stop any playing audio
+      if (currentAudio) {
+        currentAudio.pause();
+        setIsPlaying(null);
+        setCurrentAudio(null);
+      }
     } else {
       await fetchLivekitToken();
     }
   };
 
+  // Auto-scroll and audio handling - but only for non-voice mode
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
 
-    const lastMsg = messages[messages.length - 1];
-    if (lastMsg?.audio && !lastMsg.loading && !voiceMode) {
-      toggleAudio(lastMsg.audio);
-    }
-
-    if (transcript && listening && !voiceMode) {
-      setInput(transcript);
-      const isUserMsg = messages.some(
-        (msg) => msg.sender === "You" && msg.text === transcript
-      );
-      if (!isUserMsg) {
-        setMessages((prev) => [
-          ...prev.filter((msg) => !msg.loading),
-          { sender: "You", text: transcript },
-        ]);
+    // Only auto-play audio in text mode, not voice mode
+    if (!voiceMode) {
+      const lastMsg = messages[messages.length - 1];
+      if (
+        lastMsg?.audio &&
+        !lastMsg.loading &&
+        lastMsg.source === "websocket"
+      ) {
+        toggleAudio(lastMsg.audio);
       }
     }
-  }, [messages, transcript, listening, voiceMode, setMessages]);
+  }, [messages, voiceMode]);
+
+  // Handle speech recognition transcript - only in text mode
+  useEffect(() => {
+    if (transcript && listening && !voiceMode) {
+      setInput(transcript);
+    }
+  }, [transcript, listening, voiceMode]);
 
   // Check speech recognition support once on mount
   useEffect(() => {
@@ -200,42 +213,95 @@ export default function ChatBox({
     }
   }, [browserSupportsSpeechRecognition]);
 
-  // Voice Assistant Component
   const VoiceAssistant = () => {
     const { state, audioTrack, agentTranscriptions } = useVoiceAssistant();
+    const transcriptionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const lastProcessedTextRef = useRef<string | null>(null);
 
     useEffect(() => {
       console.log("Voice assistant state:", state);
-      console.log("Audio track:", audioTrack);
-      console.log("Agent transcriptions:", agentTranscriptions);
-    }, [state, audioTrack, agentTranscriptions]);
+    }, [state]);
 
     useEffect(() => {
-      if (voiceMode && agentTranscriptions?.length > 0) {
+      if (!voiceModeRef.current || !agentTranscriptions?.length) return;
+
+      // Clear any existing timeout to debounce
+      if (transcriptionTimeoutRef.current) {
+        clearTimeout(transcriptionTimeoutRef.current);
+      }
+
+      // Debounce transcription processing
+      transcriptionTimeoutRef.current = setTimeout(() => {
         const latestTranscription =
           agentTranscriptions[agentTranscriptions.length - 1];
 
-        const isDuplicate = messages.some(
-          (msg) =>
-            msg.sender === "Assistant" && msg.text === latestTranscription.text
-        );
-
-        if (latestTranscription.text && !isDuplicate) {
-          setMessages((prev) => [
-            ...prev.filter((msg) => !msg.loading),
-            {
-              sender: "Assistant",
-              text: latestTranscription.text,
-              avatarUrl: "/bot.png",
-            },
-          ]);
+        // Skip empty or very short transcriptions
+        if (
+          !latestTranscription.text ||
+          latestTranscription.text.trim().length < 3
+        ) {
+          return;
         }
-      }
-    }, [agentTranscriptions, voiceMode, setMessages, messages]);
+
+        const currentText = latestTranscription.text.trim();
+
+        // Generate a unique ID for this transcription
+        const transcriptionId = `${Date.now()}-${currentText.slice(0, 20)}`;
+
+        // Only process if the text is new and different from the last processed text
+        if (
+          transcriptionId !== lastVoiceTranscriptionId &&
+          currentText !== lastProcessedTextRef.current
+        ) {
+          console.log("Adding voice transcription:", currentText);
+
+          setMessages((prev) => {
+            // Remove any loading voice messages
+            const filtered = prev.filter(
+              (msg) => !(msg.loading && msg.source === "voice")
+            );
+
+            // Check for duplicates based on exact text
+            const isDuplicate = filtered.some(
+              (msg) =>
+                msg.sender === "Assistant" &&
+                msg.text === currentText &&
+                msg.source === "voice"
+            );
+
+            if (!isDuplicate) {
+              return [
+                ...filtered,
+                {
+                  sender: "Assistant",
+                  text: currentText,
+                  avatarUrl: "/bot.png",
+                  source: "voice" as const,
+                },
+              ];
+            }
+            return filtered;
+          });
+
+          setLastVoiceTranscriptionId(transcriptionId);
+          lastProcessedTextRef.current = currentText; // Update last processed text
+        }
+      }, 750); // Increased debounce time to 750ms for more stability
+
+      // Cleanup timeout on unmount
+      return () => {
+        if (transcriptionTimeoutRef.current) {
+          clearTimeout(transcriptionTimeoutRef.current);
+        }
+      };
+    }, [agentTranscriptions, lastVoiceTranscriptionId]);
 
     return (
       <div className="voice-mode mb-4">
-        <p className="text-xs text-gray-500">Voice Assistant State: {state}</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-gray-500">Voice Assistant: {state}</p>
+          <div className="text-xs text-green-400">🎤 Voice Mode Active</div>
+        </div>
         <VoiceAssistantControlBar />
         <BarVisualizer
           trackRef={audioTrack}
@@ -247,11 +313,24 @@ export default function ChatBox({
       </div>
     );
   };
+  // Filter messages based on mode
+  const filteredMessages = messages.filter((msg) => {
+    if (voiceMode) {
+      // In voice mode, show all messages but prioritize voice messages
+      return true;
+    } else {
+      // In text mode, hide voice-only messages
+      return msg.source !== "voice";
+    }
+  });
 
   return (
     <div className="flex flex-col w-full h-screen bg-neutral-900 text-gray-200">
-      <div className="border-b border-neutral-800 px-4 py-3 text-center text-sm text-gray-400">
-        Lexcapital Assistant
+      <div className="border-b border-neutral-800 px-4 py-3 text-center text-sm text-gray-400 flex items-center justify-between">
+        <span>Lexcapital Assistant</span>
+        {voiceMode && (
+          <span className="text-green-400 text-xs">🎤 Voice Mode</span>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2 scrollbar-thin scrollbar-thumb-neutral-700 scrollbar-track-neutral-900">
@@ -264,11 +343,13 @@ export default function ChatBox({
             </div>
           </div>
         ) : (
-          messages.map((msg, i) => {
+          filteredMessages.map((msg, i) => {
             const isUser = msg.sender === "You";
+            const isVoiceMessage = msg.source === "voice";
+
             return (
               <motion.div
-                key={i}
+                key={`${i}-${msg.source}`}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.2, delay: i * 0.05 }}
@@ -280,13 +361,17 @@ export default function ChatBox({
                   <img
                     src={msg.avatarUrl || "/bot.png"}
                     alt="bot"
-                    className="w-6 h-6 rounded-full border border-neutral-700 p-1"
+                    className={`w-6 h-6 rounded-full border p-1 ${
+                      isVoiceMessage ? "border-green-500" : "border-neutral-700"
+                    }`}
                   />
                 )}
                 <div
                   className={`relative max-w-xs px-3 py-2 rounded-xl text-sm leading-snug group ${
                     isUser
                       ? "bg-blue-700 text-white"
+                      : isVoiceMessage
+                      ? "bg-green-800 text-gray-200"
                       : "bg-neutral-800 text-gray-200"
                   }`}
                 >
@@ -302,23 +387,30 @@ export default function ChatBox({
                   ) : (
                     <p>{msg.text}</p>
                   )}
-                  {msg.audio && !msg.loading && !voiceMode && (
-                    <button
-                      onClick={() => toggleAudio(msg.audio!)}
-                      className="absolute bottom-1 right-1 w-5 h-5 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center p-2 transition text-xs"
-                      title={
-                        isPlaying === msg.audio ? "Pause audio" : "Play audio"
-                      }
-                    >
-                      {isPlaying === msg.audio ? "⏸" : "▶"}
-                    </button>
-                  )}
+
+                  {/* Audio button - only show for websocket messages and not in voice mode */}
+                  {msg.audio &&
+                    !msg.loading &&
+                    !voiceMode &&
+                    msg.source === "websocket" && (
+                      <button
+                        onClick={() => toggleAudio(msg.audio!)}
+                        className="absolute bottom-1 right-1 w-5 h-5 bg-blue-600 hover:bg-blue-500 rounded-full flex items-center justify-center p-2 transition text-xs"
+                        title={
+                          isPlaying === msg.audio ? "Pause audio" : "Play audio"
+                        }
+                      >
+                        {isPlaying === msg.audio ? "⏸" : "▶"}
+                      </button>
+                    )}
+
+                  {/* Copy button */}
                   {!msg.loading && (
                     <button
                       onClick={() => copyToClipboard(msg.text, i)}
                       className="absolute top-1 right-1 text-xs bg-neutral-700 hover:bg-neutral-600 text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition"
                     >
-                      {copiedMsg === i ? "copied" : "📋"}
+                      {copiedMsg === i ? "✓" : "📋"}
                     </button>
                   )}
                 </div>
@@ -343,9 +435,13 @@ export default function ChatBox({
         {connectionError && (
           <div className="mb-2 text-xs text-red-400">{connectionError}</div>
         )}
+
         {voiceMode && !livekitToken && (
-          <p className="text-red-400">Connecting to LiveKit...</p>
+          <p className="text-orange-400 mb-2 text-sm">
+            Connecting to LiveKit...
+          </p>
         )}
+
         {voiceMode && livekitToken && (
           <LiveKitRoom
             token={livekitToken}
@@ -356,34 +452,44 @@ export default function ChatBox({
             <VoiceAssistant />
           </LiveKitRoom>
         )}
+
+        {/* Text input - disabled in voice mode */}
         <div className="flex items-center gap-2">
           <input
             type="text"
-            className="flex-grow bg-neutral-800 border border-neutral-700 rounded-full px-3 py-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+            className={`flex-grow bg-neutral-800 border border-neutral-700 rounded-full px-3 py-2 text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 ${
+              voiceMode ? "cursor-not-allowed" : ""
+            }`}
             value={input}
-            disabled={loadingSession}
+            disabled={loadingSession || voiceMode}
             onChange={(e) => setInput(e.target.value)}
             placeholder={
               loadingSession
                 ? "Initializing session..."
+                : voiceMode
+                ? "Voice mode active - use microphone"
                 : "Type your message..."
             }
-            onKeyDown={(e) => e.key === "Enter" && handleSend()}
+            onKeyDown={(e) => e.key === "Enter" && !voiceMode && handleSend()}
           />
+
           <button
             onClick={toggleVoiceMode}
-            className={`px-3 py-2 rounded-full ${
-              voiceMode ? "bg-red-600" : "bg-neutral-700"
+            className={`px-3 py-2 rounded-full transition ${
+              voiceMode
+                ? "bg-red-600 hover:bg-red-500"
+                : "bg-green-600 hover:bg-green-500"
             } text-white`}
-            title={voiceMode ? "Stop voice" : "Start voice"}
+            title={voiceMode ? "Exit voice mode" : "Enter voice mode"}
             disabled={botIsTyping}
           >
-            {voiceMode ? "Stop" : "🎤 Voice Mode"}
+            {voiceMode ? "🔇 Exit Voice" : "🎤 Voice"}
           </button>
+
           <button
             onClick={handleSend}
-            disabled={loadingSession || !input.trim()}
-            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition disabled:opacity-50"
+            disabled={loadingSession || !input.trim() || voiceMode}
+            className="bg-blue-700 hover:bg-blue-600 px-4 py-2 rounded-full text-white transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Send
           </button>
