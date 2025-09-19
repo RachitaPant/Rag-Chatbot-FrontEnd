@@ -12,7 +12,7 @@ import {
   RoomAudioRenderer,
 } from "@livekit/components-react";
 import "@livekit/components-styles";
-import Image from "next/image"; // Import Next.js Image component
+import Image from "next/image";
 
 type Message = {
   sender: string;
@@ -55,6 +55,7 @@ export default function ChatBox({
   const [lastVoiceTranscriptionId, setLastVoiceTranscriptionId] = useState<
     string | null
   >(null);
+  const lastPlayedAudioRef = useRef<string | null>(null);
 
   const botIsTyping = !!(
     messages.length &&
@@ -80,6 +81,7 @@ export default function ChatBox({
   }, [voiceMode]);
 
   // Memoized handlers
+
   const toggleAudio = useCallback(
     (url: string) => {
       if (currentAudio) {
@@ -175,6 +177,8 @@ export default function ChatBox({
   }, [voiceMode, currentAudio, fetchLivekitToken]);
 
   // Auto-scroll and audio handling
+  // Add a ref to track the last played audio URL
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     if (!voiceMode) {
@@ -182,8 +186,10 @@ export default function ChatBox({
       if (
         lastMsg?.audio &&
         !lastMsg.loading &&
-        lastMsg.source === "websocket"
+        lastMsg.source === "websocket" &&
+        lastPlayedAudioRef.current !== lastMsg.audio // Prevent replaying the same audio
       ) {
+        lastPlayedAudioRef.current = lastMsg.audio;
         toggleAudio(lastMsg.audio);
       }
     }
@@ -203,41 +209,51 @@ export default function ChatBox({
     }
   }, [browserSupportsSpeechRecognition]);
 
-  const VoiceAssistant = () => {
+  const VoiceAssistant: React.FC = () => {
     const { state, audioTrack, agentTranscriptions } = useVoiceAssistant();
-    const transcriptionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const lastProcessedTextRef = useRef<string | null>(null);
+    const thinkingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+    // Debug state transitions
     useEffect(() => {
-      console.log("Voice assistant state:", state);
+      console.log("VoiceAssistant state:", state);
     }, [state]);
 
+    // Watchdog: detect if agent is stuck thinking
     useEffect(() => {
-      if (!voiceModeRef.current || !agentTranscriptions?.length) return;
-
-      if (transcriptionTimeoutRef.current) {
-        clearTimeout(transcriptionTimeoutRef.current);
-      }
-
-      transcriptionTimeoutRef.current = setTimeout(() => {
-        const latestTranscription =
-          agentTranscriptions[agentTranscriptions.length - 1];
-
-        if (
-          !latestTranscription.text ||
-          latestTranscription.text.trim().length < 3
-        ) {
-          return;
+      // Only start watchdog if in "thinking" state
+      if (state === "thinking") {
+        if (thinkingTimeoutRef.current) {
+          clearTimeout(thinkingTimeoutRef.current);
         }
+        thinkingTimeoutRef.current = setTimeout(() => {
+          console.warn(
+            "Agent stuck in 'thinking' state (no transition for some time)"
+          );
+          // You can trigger some fallback UI / message / retry here
+        }, 5000); // adjust timeout duration as needed
+      } else {
+        // Clear if not in thinking
+        if (thinkingTimeoutRef.current) {
+          clearTimeout(thinkingTimeoutRef.current);
+          thinkingTimeoutRef.current = null;
+        }
+      }
+    }, [state]);
 
-        const currentText = latestTranscription.text.trim();
-        const transcriptionId = `${Date.now()}-${currentText.slice(0, 20)}`;
+    // Handle final transcriptions
+    useEffect(() => {
+      if (!agentTranscriptions || agentTranscriptions.length === 0) return;
 
-        if (
-          transcriptionId !== lastVoiceTranscriptionId &&
-          currentText !== lastProcessedTextRef.current
-        ) {
-          console.log("Adding voice transcription:", currentText);
+      const latest = agentTranscriptions[agentTranscriptions.length - 1];
+      if (!latest.text) return;
+
+      const text = latest.text.trim();
+
+      // assume there is a `final` boolean flag on transcriptions; adjust if named differently
+      if (latest.final && text.length > 0) {
+        if (text !== lastProcessedTextRef.current) {
+          console.log("Final transcription from agent:", text);
 
           setMessages((prev) => {
             const filtered = prev.filter(
@@ -247,7 +263,7 @@ export default function ChatBox({
             const isDuplicate = filtered.some(
               (msg) =>
                 msg.sender === "Assistant" &&
-                msg.text === currentText &&
+                msg.text === text &&
                 msg.source === "voice"
             );
 
@@ -256,7 +272,7 @@ export default function ChatBox({
                 ...filtered,
                 {
                   sender: "Assistant",
-                  text: currentText,
+                  text,
                   avatarUrl: "/bot.png",
                   source: "voice",
                 },
@@ -265,17 +281,20 @@ export default function ChatBox({
             return filtered;
           });
 
-          setLastVoiceTranscriptionId(transcriptionId);
-          lastProcessedTextRef.current = currentText;
+          lastProcessedTextRef.current = text;
         }
-      }, 750);
+      }
+    }, [agentTranscriptions]);
 
-      return () => {
-        if (transcriptionTimeoutRef.current) {
-          clearTimeout(transcriptionTimeoutRef.current);
-        }
-      };
-    }, [agentTranscriptions]); // Removed lastVoiceTranscriptionId
+    // Detect end of agent speech: when state transitions to "listening" after speaking
+    useEffect(() => {
+      // We want to detect the moment when agent has finished speaking and is ready for next
+      if (state === "listening") {
+        console.log("Agent finished speaking — state is now 'listening'");
+        // Trigger any 'end of message' behavior here
+        // e.g., mark message done, update UI, enable user input etc.
+      }
+    }, [state]);
 
     return (
       <div className="voice-mode mb-4">
